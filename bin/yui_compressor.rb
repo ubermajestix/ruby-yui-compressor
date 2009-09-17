@@ -1,4 +1,6 @@
+require 'rubygems'
 require "yui/compressor"
+require 'zlib'
 
 begin
   gem "main", ">= 2.8.2" # 2.8.2 has a bugfix for the default block for -1 arity arguments
@@ -10,7 +12,7 @@ end
 
 
 Main::Softspoken.off!
-CompressorConsole = Main.create do
+Compressor = Main.create do
     description <<-EOS
     compress js or css files, will rename them filename.min.(js|css)
     EOS
@@ -31,11 +33,93 @@ CompressorConsole = Main.create do
       attribute
     end
     
-    option "gzip" do
+    option '-g', "gzip" do
+      fattr
       description "gzip the compressed file"
     end
     
+    option "munge" do
+      fattr
+      description "rename local variables - for javascript compression only"
+    end
+    
+    option "css" do
+      fattr
+      description "process and minify file as css"
+    end
+    
+    option "js" do
+      fattr
+      description "process and minify file as js"
+    end
+    
+    class Cfile
+      fattr :filename, :filetype, :js, :css, :file_string, :new_file, :old_size, :gzip_file
+      def initialize(opts={})
+        @file_string = opts[:file_string]
+        @filename = opts[:filename]
+        @filetype = opts[:filetype] || '.js'
+        @new_file = opts[:new_file]
+        @js = @filetype == '.js' 
+        @css = @filetype == '.css'
+        @old_size = opts[:size]
+        @gzip_file = opts[:gzip_file]
+      end
+      
+      def js?
+        !!self.js
+      end
+      
+      def css?
+        !!self.css
+      end
+    end
+    
+    def get_file
+      raise "no such file: #{file}" unless File.exists?(file)
+      file_string = File.open(file, 'rb'){|f| f.read }
+      # TODO provide directory of files File.directory?
+      filename = File.basename(file)      
+      filetype = File.extname(filename)
+      filetype = '.js' if js and filetype.empty?
+      filetype = '.css' if css and filetype.empty?
+      new_file = File.expand_path(file) << ".min"
+      gzip_file = File.expand_path(file) << ".gz"
+      unless %w".js .css".include?(filetype)
+        raise "your file doesn't appear to have a .js or .css extension, please provide the appropriate flag (--js | --css) if you do not wish to name your file with an extension"
+      end
+      # TODO ignore .min if a directory given
+      raise "really? you want to minify a minified file?" if filetype.include?(".min")
+      cfile = Cfile.new(:file_string=>file_string, :filename=>filename, :filetype=>filetype, :new_file => new_file, :size => File.size(file), :gzip_file=>gzip_file)
+      return cfile
+    rescue StandardError => e
+       puts e.inspect
+    end
+    
     run do
+      file = get_file
+      # TODO protect from minifying minified files
+      puts "minifying #{file.filename} which is #{file.filetype} kind of file"
+        
+      compressor = file.js? ? YUI::JavaScriptCompressor.new(:munge=>munge) : YUI::CssCompressor.new
+      puts compressor.class
+      unless gzip
+        compressed = compressor.compress(file.file_string)
+        puts "writing minified file to #{file.new_file}"
+        File.open(file.new_file, 'wb'){|f| f.write compressed}
+      else
+        puts "writing gzipped and minified file to #{file.gzip_file}"
+        
+        Zlib::GzipWriter.open(file.gzip_file) do |gzip|
+          compressor.compress(file.file_string) do |compressed|
+            while buffer = compressed.read(4096)
+              gzip.write(buffer)
+            end
+          end
+        end
+      end
+      
+      
       # ==== Example: Compress CSS
       #   compressor = YUI::CssCompressor.new
       #   compressor.compress(<<-END_CSS)
@@ -67,4 +151,4 @@ CompressorConsole = Main.create do
     end
 end
 
-CompressorConsole.new.run
+Compressor.new.run
