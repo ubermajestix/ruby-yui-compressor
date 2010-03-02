@@ -12,7 +12,7 @@ end
 
 
 Main::Softspoken.off!
-Compressor = Main.create do
+Main {
     description <<-EOS
     compress js or css files, will rename them filename.min.(js|css)
     EOS
@@ -149,6 +149,5 @@ Compressor = Main.create do
       #   end
       #
     end
-end
+}
 
-Compressor.new.run
